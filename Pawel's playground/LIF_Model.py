@@ -210,10 +210,10 @@ def getPhaseVar(timeSeries, nT, nGen, f, dt, bins):
     return phaseVar
 
 def synAlpha (timeSeries, tau1, tau2, nT, nGen, dt):
-    nF = int(0.01/dt)
+    nF = int(tau1/200/dt)
     filt = np.zeros((nF))
     for i in range(0, nF):
-        filt[i] = np.exp(-i*dt*1000*tau2)-np.exp(-i*dt*1000*tau1) #ampa/ka synaptic alpha function
+        filt[i] = np.exp(-i*dt*1000/tau1)-np.exp(-i*dt*1000/tau2) #ampa/ka synaptic alpha function
         
     result = []
     for i in range(nGen):
