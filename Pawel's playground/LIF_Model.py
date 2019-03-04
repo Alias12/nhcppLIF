@@ -12,7 +12,15 @@ def expVes(lambdaI,nS,maxQ):
             expVesT[i]=expVesT[i] + (lambdaI[-1,i,j] * (j+1))
     return expVesT
 
-def hybridInput(nT, nS, maxQ, aVals, aTheta, offSet, f, t, dt):
+def expVesFull(lambdaI,nT,nS,maxQ):
+    expVesT = np.zeros((nT, nS))
+    for i in range(0,nS):
+        for j in range(0,maxQ):
+            for k in range(0, nT):
+                expVesT[k, i]=expVesT[k, i] + (lambdaI[k,i,j] * (j+1))
+    return expVesT
+
+def hybridInput(nT, nS, maxQ, aVals, aTheta, offSet, f, t, dt, inputs):
     lambdaInstH = np.zeros((nT,nS))
     pInT = np.zeros((nT,nS))
     piI = np.zeros((nT,nS,maxQ+1))
@@ -28,25 +36,64 @@ def hybridInput(nT, nS, maxQ, aVals, aTheta, offSet, f, t, dt):
             lambdaInstHybrid[:,j,k]= piI[:,j,k]* lambdaInstH[:,j]
             lambdaHybrid[:,j,k]= np.cumsum(lambdaInstHybrid[:,j,k]) * dt
             
+    lambdaHybrid*=inputs
     exHybrid = expVes(lambdaHybrid,nS,maxQ+1)
     
-    return lambdaHybrid, exHybrid
+    nP = int(1/dt/f)
+    phases = int(nT/nP)
+    bins = 16
+    nBin = int(nP/bins) #bin size
+    lambdaInt = np.zeros((bins))
+    
+    for k in range(0, maxQ+1):
+        for j in range(0, phases):
+            for l in range(0, bins):
+                for i in range(1, nBin):
+                    lambdaInt[l]+= (lambdaHybrid[j*nP+l*nBin+i, -1, k]-lambdaHybrid[j*nP+l*nBin, -1, k])*nBin/nT*(k+1)**2
+                
+    return lambdaHybrid, exHybrid, lambdaInt
 
-def rateInput(nT, nS, maxQ, exHybrid, offSet, f, t, dt):
+def rateInput(nT, nS, maxQ, exHybrid, offSet, f, t, dt, lambdaAmp, inputs):
     aRate = np.zeros((nS))
     lambdaInstRate = np.zeros((nT, nS))
     lambdaRate = np.zeros((nT, nS, maxQ+1))
-
+    a=-0.41028
+    b=-0.026691
+    
+    
     for j in range(0, nS):
         aRate[j] = 2*(exHybrid[j]-offSet*t[-1])/(t[-1]+(np.sin(2*np.pi*f*t[-1]))/(2*np.pi*f))
         lambdaInstRate[:,j] = offSet +  aRate[j] * (.5 * np.cos(2* np.pi * f * t)+.5)
-        lambdaRate[:,j,0]= np.cumsum(lambdaInstRate[:, j]) * dt
-        
-    #exRate = expVes(lambdaRate,nS,maxQ+1)
+        lambdaRate[:,j,0]= np.cumsum(lambdaInstRate[:, j]) * dt# + b*t+a*np.sin(2*np.pi*f*t)
     
-    return lambdaRate#, exRate
+    
+    exRate = expVesFull(lambdaRate,nT,nS,maxQ+1)
+    exAmp = expVesFull(lambdaAmp,nT,nS,maxQ+1)
+    
+    diff = exRate-exAmp
+    
+    lambdaRate[:, :, 0] -= diff[:, :]
+    
+    exRate = expVesFull(lambdaRate,nT,nS,maxQ+1)
+    exAmp = expVesFull(lambdaAmp,nT,nS,maxQ+1)
+    
+    diff = exRate-exAmp
+    
+    nP = int(1/dt/f)
+    phases = int(nT/nP)
+    bins = 16
+    nBin = int(nP/bins) #bin size
+    lambdaInt = np.zeros((bins))
+    for j in range(0, phases):
+        for l in range(0, bins):
+            for i in range(1, nBin):
+                lambdaInt[l]+= (lambdaRate[j*nP+l*nBin+i, -1, 0]-lambdaRate[j*nP+l*nBin, -1, 0])*nBin/nT
+                    
+                    
+                    
+    return lambdaRate, lambdaInt#, exRate
 
-def ampInput(nT, nS, maxQ, exHybrid, aTheta, offSet, f, t, dt):
+def ampInput(nT, nS, maxQ, exHybrid, aTheta, offSet, f, t, dt, inputs):
     lambdaInstHAmp = np.zeros((nT, nS))
     lambdaInstAmp = np.zeros((nT, nS, maxQ+1))
     lambdaAmp = np.zeros((nT, nS, maxQ+1))
@@ -64,17 +111,30 @@ def ampInput(nT, nS, maxQ, exHybrid, aTheta, offSet, f, t, dt):
             
     #exAmp = expVes(lambdaAmp,nS,maxQ+1)
     
-    return lambdaAmp#, exAmp
+    
+    nP = int(1/dt/f)
+    phases = int(nT/nP)
+    bins = 16
+    nBin = int(nP/bins) #bin size
+    lambdaInt = np.zeros((bins))
+    
+    for k in range(0, maxQ+1):
+        for j in range(0, phases):
+            for l in range(0, bins):
+                for i in range(1, nBin):
+                    lambdaInt[l]+= (lambdaAmp[j*nP+l*nBin+i, -1, k]-lambdaAmp[j*nP+l*nBin, -1, k])*nBin/nT*(k+1)**2
+    
+    return lambdaAmp, lambdaInt#, exAmp
 
-def getLambdas(nT, nS, maxQ, maxAVal, maxTheta, offSet, f, t, dt):
-    aVals = np.arange(0,maxAVal,maxAVal/nS)
-    aTheta = np.arange(0,maxTheta,maxTheta/nS)
+def getLambdas(nT, nS, maxQ, maxAVal, maxTheta, offSet, f, t, dt, inputs):
+    aVals = np.linspace(maxAVal/nS,maxAVal,num=nS)
+    aTheta = np.linspace(maxTheta/nS,maxTheta,num=nS)
     
-    lambdaHybrid, exHybrid = hybridInput(nT, nS, maxQ, aVals, aTheta, offSet, f, t, dt)
-    lambdaRate = rateInput(nT, nS, maxQ, exHybrid, offSet, f, t, dt)
-    lambdaAmp = ampInput(nT, nS, maxQ, exHybrid, aTheta, offSet, f, t, dt)
+    lambdaHybrid, exHybrid, exHybridVar = hybridInput(nT, nS, maxQ, aVals, aTheta, offSet, f, t, dt, inputs)
+    lambdaAmp, exAmpVar = ampInput(nT, nS, maxQ, exHybrid, aTheta, offSet, f, t, dt, inputs)
+    lambdaRate, exRateVar = rateInput(nT, nS, maxQ, exHybrid, offSet, f, t, dt, lambdaAmp, inputs)
     
-    return lambdaHybrid, lambdaRate, lambdaAmp
+    return lambdaHybrid, lambdaRate, lambdaAmp, exHybridVar, exRateVar, exAmpVar
 
 def sampleEvents(lambdaI, nT, nS, maxQ, dt, nGen, fuckups): 
     eventMat = []
@@ -104,7 +164,7 @@ def sampleEvents(lambdaI, nT, nS, maxQ, dt, nGen, fuckups):
                     event = np.round(i*dt, int(np.ceil(-np.log10(dt))))
                     events.append(event)
             if not (len(events)==counter):
-                fuckups[nS] +=1
+                fuckups[nS] += (counter-len(events))*(k+1)
             eventRow.append(events)
         eventMat.append(eventRow)
     return eventMat
@@ -118,50 +178,137 @@ def makeTimeSeries(eventMat, quantaMat, nT, nS, maxQ, dt, nGen):
                 quantaMat[nS, j] += k+1
     return timeSeries
 
+def getCumQuanta(timeSeries, nT, nS, nGen): # timeSeries[contrastN, tN, genN]
+    cumQuanta = np.zeros((nT, nS))
+    varQuanta = np.zeros((nT, nS))
+    for i in range(0, nT):
+        for j in range(nS):
+            if (i>0):
+                cumQuanta[i, j] = cumQuanta[i-1, j]
+            for k in range(nGen):
+                cumQuanta[i, j] += timeSeries[j, i, k]/nGen
+                    
+            varQuanta[i, j] = np.var(timeSeries[j, i, :])
+
+    return cumQuanta, varQuanta
+
+def getPhaseVar(timeSeries, nT, nGen, f, dt, bins):
+    nP = int(1/dt/f) #phase size
+    nBin = int(nP/bins) #bin size
+    genPhaseVar = np.zeros((nBin, nGen)) #distribution for each gen
+    numPhases = int(nT/nP) #number of phases
+    phaseVar = np.zeros((nBin)) #distribution for contrast
+    
+    for i in range(0, numPhases):
+        for j in range(0, nBin):
+            for k in range(0, nGen):
+                genPhaseVar[j, k] += np.var(timeSeries[-1, (i*nP+j*nBin):(i*nP+(j+1)*nBin), k])
+    
+    for i in range(0, nBin):
+        phaseVar[i] = np.mean(genPhaseVar[i, :])
+        
+    return phaseVar
+
 def synAlpha (timeSeries, tau1, tau2, nT, nGen, dt):
-    nF = int(0.01/dt)
+    nF = int(tau1/200/dt)
     filt = np.zeros((nF))
     for i in range(0, nF):
-        filt[i] = np.exp(-i*dt*1000*tau2)-np.exp(-i*dt*1000*tau1) #ampa/ka synaptic alpha function
+        filt[i] = np.exp(-i*dt*1000/tau1)-np.exp(-i*dt*1000/tau2) #ampa/ka synaptic alpha function
         
     result = []
     for i in range(nGen):
         result.append(np.convolve(timeSeries[:, i], filt[:]))
     return result
 
-def lifModelCurrVec(curr, spikeMat, nT, nS, vDev, vThresh, vRest, vReset, gLeak, res, dt, nGen, ns, inputT): # for faster spike counting
+def lifModelCurrVec(curr, spikeMat, nT, nS, vDev, vThresh, vRest, vReset, gLeak, res, dt, nGen, ns, inputT, save): # for faster spike counting
     #tVec = time.time()
     V = np.zeros((nT, nGen))
     V[0, :] = vRest
+    
+    freeV = np.zeros((nT, nGen))
+    freeV[0, :] = vRest
     #xScale = np.arange(0, recLen, dt)
+    
+    meanV = np.zeros((nT))
+    meanFreeV = np.zeros((nT))
+    meanV[0] = vRest*nGen
+    meanFreeV[0] = vRest*nGen
     
     for i in range(0, nT-1):
         V[i+1, :] = V[i,:] + (-(V[i,:] - vRest)*gLeak + res*curr[nS, i, :] + ns[i, nS, :])*dt #vectorized additive noise
+        freeV[i+1, :] = freeV[i,:] + (-(freeV[i,:] - vRest)*gLeak + res*curr[nS, i, :] + ns[i, nS, :])*dt
+        
         for j in range(0, nGen):
             if V[i+1, j]>=vThresh:
                 V[i+1, j] = vReset
                 spikeMat.append([round((i+1)*dt, -int(np.ceil(np.log10(dt)))), nS, j])
-    """name = 'samples/samples_'+str(vRest)+'_'+str(gLeak)+'_'+str(vDev)+'.hdf5'
-    with h5py.File(name, 'r+') as data:
-        name1 = inputT+'/voltage'
-        name2 = inputT+'/current'
-        dset1 = data[name1]
-        dset2 = data[name2]
-        dset1[:] = V[:, 0]
-        dset2[:] = curr[nS, :, 0]
-        data.close()"""
+           
+            meanV[i+1] += V[i+1, j]
+            meanFreeV[i+1] += freeV[i+1, j]
+            
+    meanV/=nGen
+    meanFreeV/=nGen
+       
+    if(save==True):
+        output=V
+        output2=freeV
+    else:
+        output = 0
+        output2 = 0
         
+    return meanV, meanFreeV, output, output2
     #tVecEnd = time.time()
-
+    
+def lifModelCondVec(curr, spikeMat, nT, nS, vDev, vThresh, vRest, vReset, gLeak, gExc, dt, nGen, ns, inputT, save, vExc): # for faster spike counting
+    #tVec = time.time()
+    V = np.zeros((nT, nGen))
+    V[0, :] = vRest
+    
+    freeV = np.zeros((nT, nGen))
+    freeV[0, :] = vRest
+    #xScale = np.arange(0, recLen, dt)
+    
+    meanV = np.zeros((nT))
+    meanFreeV = np.zeros((nT))
+    meanV[0] = vRest*nGen
+    meanFreeV[0] = vRest*nGen
+    
+    for i in range(0, nT-1):
+        V[i+1, :] = V[i,:] + (-(V[i,:] - vRest)*gLeak + gExc*(vExc-V[i, :])*curr[nS, i, :] + ns[i, nS, :])*dt #vectorized additive noise
+        freeV[i+1, :] = freeV[i,:] + (-(freeV[i,:] - vRest)*gLeak + gExc*(vExc-V[i, :])*curr[nS, i, :] + ns[i, nS, :])*dt
+        
+        for j in range(0, nGen):
+            if V[i+1, j]>=vThresh:
+                V[i+1, j] = vReset
+                spikeMat.append([round((i+1)*dt, -int(np.ceil(np.log10(dt)))), nS, j])
+           
+            meanV[i+1] += V[i+1, j]
+            meanFreeV[i+1] += freeV[i+1, j]
+            
+    meanV/=nGen
+    meanFreeV/=nGen
+       
+    if(save==True):
+        output=V
+        output2=freeV
+    else:
+        output = 0
+        output2 = 0
+        
+    return meanV, meanFreeV, output, output2
+    #tVecEnd = time.time()
+    
 def countSpikes(spikeMat, nS, nGen, dt): 
     
     tSpikesStart = time.time()
     spikeTimeMat = []
+    maxSpikes = 0
     
     n = len(spikeMat)
     
     if n<1:
-        return []
+        spikeTimeMat = np.full((nS, nGen, 2), np.nan)
+        return spikeTimeMat, 2
     
     i=0
     for j in range (0, nS):
@@ -180,9 +327,12 @@ def countSpikes(spikeMat, nS, nGen, dt):
             genN = 0
             while (genN<nGen):
                 spikeTimes=[]
+                spikes = 0
                 while(k<nk and contrastSpikeMat[k][1]==genN):
                     spikeTimes.append(contrastSpikeMat[k][0])
                     k+=1
+                    spikes += 1
+                maxSpikes = max(maxSpikes, spikes)
                 spikeTimeRow.append(spikeTimes)
                 genN+=1
             spikeTimeMat.append(spikeTimeRow)
@@ -190,7 +340,7 @@ def countSpikes(spikeMat, nS, nGen, dt):
     tSpikesEnd = time.time()
     print("counting spikes - %fs" % (tSpikesEnd-tSpikesStart))
     
-    return spikeTimeMat
+    return spikeTimeMat, maxSpikes
 
 def createInput (lambdaI, eventMat, timeSeries, quantaMat, curr, nT, nS, nGen, maxQ, dt, tau1, tau2):
     tPreStart = time.time()
@@ -209,7 +359,7 @@ def createInput (lambdaI, eventMat, timeSeries, quantaMat, curr, nT, nS, nGen, m
     print("pre - %fs" % (tPreEnd-tPreStart))
     return fuckups
 
-def runContrasts(lambdaI, nT, nS, nGen, maxQ, dt, vDev, vThresh, vRest, vReset, gLeak, res, tau1, tau2, inputT):
+def runContrasts(lambdaI, nT, nS, nGen, maxQ, dt, vDev, vThresh, vRest, vReset, gLeak, res, tau1, tau2, inputT, save, f, gExc, vExc, doCond, saveQuantaStats, savePhaseStats, doCurr):
 
     modelTimes = np.zeros((nS))
     spikeTrueMat = []
@@ -234,80 +384,247 @@ def runContrasts(lambdaI, nT, nS, nGen, maxQ, dt, vDev, vThresh, vRest, vReset, 
     ###################### MODEL RUN ###############################
     
     spikeMat = []
-    
+    allVs = []
+    allFreeVs = []
+    meanVs = []
+    meanFreeVs = []
+    spikeCondMat = []
+    allConds = []
+    allFreeConds = []
+    meanConds = []
+    meanFreeConds = []
     for i in range (0, nS):
         tContrastStart = time.time()
-        lifModelCurrVec(curr, spikeMat, nT, i, vDev, vThresh, vRest, vReset, gLeak, res, dt, nGen, ns, inputT)
+        if (doCurr == True):
+            meanV, meanFreeV, Vs, freeVs = lifModelCurrVec(curr, spikeMat, nT, i, vDev, vThresh, vRest, vReset, gLeak, res, dt, nGen, ns, inputT, save)
+            meanVs.append(meanV)
+            meanFreeVs.append(meanFreeV)
+            allVs.append(Vs)
+            allFreeVs.append(freeVs)
+        
+        if (doCond == True):
+            meanCond, meanFreeCond, conds, freeConds = lifModelCondVec(curr, spikeCondMat, nT, i, vDev, vThresh, vRest, vReset, gLeak, gExc, dt, nGen, ns, inputT, save, vExc)
+            meanConds.append(meanCond)
+            meanFreeConds.append(meanFreeCond)
+            allConds.append(conds)
+            allFreeConds.append(freeConds)
         tContrastEnd = time.time()
         
         modelTimes[i] = tContrastEnd-tContrastStart
+    
+    
+    
+    if (saveQuantaStats == True):
+        cumQuanta, varQuanta = getCumQuanta(timeSeries, nT, nS, nGen)
+    if (savePhaseStats == True):
+        phaseVar = getPhaseVar(timeSeries, nT, nGen, f, dt, 16)
     
     timeSum = np.zeros((nS))
     timeSum[:] = np.cumsum(modelTimes[:])
     print("%d runs - %fs" % (nGen*nS, timeSum[-1]))
     ################## COUNTING SPIKES ##############################
+    cleanSpikeTimes = []
+    maxSpikes = 0
+    maxSpikesCond = 0
+    if (doCurr == True):
+        spikeTimeMat, maxSpikes = countSpikes(spikeMat, nS, nGen, dt)
+        cleanSpikeTimes = cleanSpikeMat(spikeTimeMat, nS, nGen, maxSpikes)
     
-    spikeTimeMat = countSpikes(spikeMat, nS, nGen, dt)
-            
-    return spikeTimeMat, quantaMat, fuckups
+    cleanCondTimes = []
+    if (doCond == True):
+        condTimeMat, maxSpikesCond = countSpikes(spikeCondMat, nS, nGen, dt)
+        cleanCondTimes = cleanSpikeMat(condTimeMat, nS, nGen, maxSpikesCond)
+    
+    return cleanSpikeTimes, quantaMat, fuckups, meanVs, meanFreeVs, cumQuanta, varQuanta, allVs, allFreeVs, phaseVar, cleanCondTimes, meanConds, meanFreeConds, allConds, allFreeConds, maxSpikes, maxSpikesCond
 
 
+def getFirstSpikes(spikeMatrix, nS, nGen):
+    
+    firstSpikes = np.zeros((nGen, nS))
+    
+    for j in range(0, nS):
+        for k in range(0, nGen):
+            if (len(spikeMatrix[j][k])>0):
+                firstSpikes[k, j] = spikeMatrix[j][k][0]
+            else:
+                firstSpikes[k, j] = np.nan
+                
+    return firstSpikes
 
-def runAll(recLen, dt, f, nS, nGen, offSet, maxAVal, maxTheta, maxQ, vRest, vReset, vThresh, gLeak, res, vDev, tau1, tau2):
+def cleanSpikeMat(spikeMatrix, nS, nGen, maxSpikes):
+    cleanSpikes = np.full((nS, nGen, max(maxSpikes, 1)), np.nan)
+    for j in range(0, nS):
+        for k in range(0, nGen):
+            for i in range(0, len(spikeMatrix[j][k])):
+                cleanSpikes[j, k, i] = spikeMatrix[j][k][i]
+    return cleanSpikes
+
+
+def runAll(recLen, dt, f, nS, nGen, offSet, maxAVal, maxTheta, maxQ, vRest, vReset, vThresh, gLeak, res, vDev, tau1, tau2, save, inputs, gExc, vExc, doCond, doHybrid, doRate, doAmp, saveMeanV, saveMeanFreeV, saveQuantaStats, savePhaseStats, saveFirstSpikes, doCurr):
     t = np.arange(0,recLen,dt)
     nT = len(t)
     
-    lambdaHybrid, lambdaRate, lambdaAmp = getLambdas(nT, nS, maxQ, maxAVal, maxTheta, offSet, f, t, dt)
-    
-    """name = 'samples/samples_'+str(vRest)+'_'+str(gLeak)+'_'+str(vDev)+'.hdf5'
-    with h5py.File(name, 'w') as data:
-        data.create_dataset('hybrid/voltage', data=np.zeros((nT)))
-        data.create_dataset('hybrid/current', data=np.zeros((nT)))
-        data.create_dataset('rate/voltage', data=np.zeros((nT)))
-        data.create_dataset('rate/current', data=np.zeros((nT)))
-        data.create_dataset('amp/voltage', data=np.zeros((nT)))
-        data.create_dataset('amp/current', data=np.zeros((nT)))
-        data.close()"""
+    lambdaHybrid, lambdaRate, lambdaAmp, exHybridVar, exRateVar, exAmpVar = getLambdas(nT, nS, maxQ, maxAVal, maxTheta, offSet, f, t, dt, inputs)
         
-    print('A/R/NHPP: ')
-    hybridSpikeMat, hybridQuanta, hybridFuckups = runContrasts(lambdaHybrid, nT, nS, nGen, maxQ, dt, vDev, vThresh, vRest, vReset, gLeak, res, tau1, tau2, 'hybrid')
-    print('R/NHPP: ')
-    rateSpikeMat, rateQuanta, rateFuckups = runContrasts(lambdaRate, nT, nS, nGen, maxQ, dt, vDev, vThresh, vRest, vReset, gLeak, res, tau1, tau2, 'rate')
-    print('A/HPP: ')
-    ampSpikeMat, ampQuanta, ampFuckups = runContrasts(lambdaAmp, nT, nS, nGen, maxQ, dt, vDev, vThresh, vRest, vReset, gLeak, res, tau1, tau2, 'amp')
+    if (doHybrid == True):
+        print('A/R/NHPP: ')
+        hybridSpikeMat, hybridQuanta, hybridFuckups, hybridMean, hybridFree, hybridInput, hybridVar, hybridVs, hybridFreeVs, hybridPhaseVar, hybridCondTimes, hybridMeanCond, hybridMeanFreeCond, hybridAllCond, hybridAllFreeCond, hybridSpikes, hybridSpikesCond = runContrasts(lambdaHybrid, nT, nS, nGen, maxQ, dt, vDev, vThresh, vRest, vReset, gLeak, res, tau1, tau2, 'hybrid', save, f, gExc, vExc, doCond, saveQuantaStats, savePhaseStats, doCurr)
+        lambdaH = expVesFull(lambdaHybrid,nT,nS,maxQ+1)
+        if (saveFirstSpikes == True):
+            if (doCurr == True):
+                hybridFirst = getFirstSpikes(hybridSpikeMat, nS, nGen)
+            if (doCond == True):
+                hybridFirstCond = getFirstSpikes(hybridCondTimes, nS, nGen)
+        
+    if (doRate == True):
+        print('R/NHPP: ')
+        rateSpikeMat, rateQuanta, rateFuckups, rateMean, rateFree, rateInput, rateVar, rateVs, rateFreeVs, ratePhaseVar, rateCondTimes, rateMeanCond, rateMeanFreeCond, rateAllCond, rateAllFreeCond, rateSpikes, rateSpikesCond = runContrasts(lambdaRate, nT, nS, nGen, maxQ, dt, vDev, vThresh, vRest, vReset, gLeak, res, tau1, tau2, 'rate', save, f, gExc, vExc, doCond, saveQuantaStats, savePhaseStats, doCurr)
+        lambdaR = expVesFull(lambdaRate,nT,nS,maxQ+1)
+        if (saveFirstSpikes == True):
+            if (doCurr == True):
+                rateFirst = getFirstSpikes(rateSpikeMat, nS, nGen)
+            if (doCond == True):
+                rateFirstCond = getFirstSpikes(rateCondTimes, nS, nGen)
+        
+    if (doAmp == True):
+        print('A/HPP: ')
+        ampSpikeMat, ampQuanta, ampFuckups, ampMean, ampFree, ampInput, ampVar, ampVs, ampFreeVs, ampPhaseVar, ampCondTimes, ampMeanCond, ampMeanFreeCond, ampAllCond, ampAllFreeCond, ampSpikes, ampSpikesCond = runContrasts(lambdaAmp, nT, nS, nGen, maxQ, dt, vDev, vThresh, vRest, vReset, gLeak, res, tau1, tau2, 'amp', save, f, gExc, vExc, doCond, saveQuantaStats, savePhaseStats, doCurr)
+        lambdaA = expVesFull(lambdaAmp,nT,nS,maxQ+1)
+        if (saveFirstSpikes == True):
+            if (doCurr == True):
+                ampFirst = getFirstSpikes(ampSpikeMat, nS, nGen)
+            if (doCond == True):
+                ampFirstCond = getFirstSpikes(ampCondTimes, nS, nGen)
     
     # data saving
     
     print('saving data: ')
     tData = time.time()
     dFloat = h5py.special_dtype(vlen=np.dtype('float32'))
-    #dInt = h5py.special_dtype(vlen=np.dtype('int32'))
     
-    name = 'data/noise/modelData'+str(vRest)+'_'+str(gLeak)+'_'+str(vDev)+'.hdf5'
+    name = 'data/modelData'+str(vRest)+'_'+str(gLeak)+'_'+str(vDev)+'_'+str(inputs)+'.h5'
+    metadata = 'Model parameters: vRest = '+str(vRest)+'; gLeak = '+str(gLeak)+', vDev = '+str(vDev)+', dt = '+str(dt)+', '+str(inputs)+' inputs used; '+str(nGen)+' simulations for each.'
     with h5py.File(name, 'w') as data:
-
-        dSet1 = data.create_dataset('hybrid/spikeMatrix', (nS, nGen,), dtype=dFloat)
-        dSet2 = data.create_dataset('hybrid/quanta', (nS, nGen,), dtype=int)
-        data.create_dataset('hybrid/fuckups', dtype=int, data=hybridFuckups)
-
-        dSet3 = data.create_dataset('rate/spikeMatrix', (nS, nGen,), dtype=dFloat)
-        dSet4 = data.create_dataset('rate/quanta', (nS, nGen,), dtype=int)
-        data.create_dataset('rate/fuckups', dtype=int, data=rateFuckups)
-
-        dSet5 = data.create_dataset('amp/spikeMatrix', (nS, nGen,), dtype=dFloat)
-        dSet6 = data.create_dataset('amp/quanta', (nS, nGen,), dtype=int)
-        data.create_dataset('amp/fuckups', dtype=int, data=ampFuckups)
         
-        for j in range(0, nS):
-            dSet1[j] = hybridSpikeMat[j] 
-            dSet2[j] = hybridQuanta[j] 
-            dSet3[j] = rateSpikeMat[j] 
-            dSet4[j] = rateQuanta[j] 
-            dSet5[j] = ampSpikeMat[j] 
-            dSet6[j] = ampQuanta[j] 
+        data.create_dataset('metadata', data=metadata)
+        
+        #######HYBRID SAVING##############
+        if (doHybrid == True):
+            
+            if (doCurr == True):
+                data.create_dataset('hybrid/current/spikeMatrix', (nS, nGen, hybridSpikes), data=hybridSpikeMat) 
+                if (saveMeanV == True): 
+                    data.create_dataset('hybrid/current/meanV', (nS, nT), data=hybridMean)
+                if (saveMeanFreeV == True):
+                    data.create_dataset('hybrid/current/freeV', (nS, nT), data=hybridFree)
+                if (saveFirstSpikes == True):
+                    data.create_dataset('hybrid/current/firstSpikes', data=hybridFirst)
+                if (save==True):
+                    data.create_dataset('hybrid/current/VSamples', (nS, nT, nGen), data = hybridVs)
+                    data.create_dataset('hybrid/current/freeVSamples', (nS, nT, nGen), data = hybridFreeVs)
+                    
+            if (doCond == True):
+                data.create_dataset('hybrid/conductance/spikeMatrix', (nS, nGen, hybridSpikesCond), data=hybridCondTimes)
+                if (saveMeanV == True):
+                    data.create_dataset('hybrid/conductance/meanV', (nS, nT), data=hybridMeanCond)
+                if (saveMeanFreeV == True):
+                    data.create_dataset('hybrid/conductance/meanFreeV', (nS, nT), data=hybridMeanFreeCond)
+                if (saveFirstSpikes == True):
+                    data.create_dataset('hybrid/conductance/firstSpikes', data=hybridFirstCond)
+                if (save==True):
+                    data.create_dataset('hybrid/conductance/VSamples', (nS, nT, nGen), data = hybridAllCond)
+                    data.create_dataset('hybrid/conductance/freeVSamples', (nS, nT, nGen), data = hybridAllFreeCond)
+                    
+            if (saveQuantaStats == True):
+                data.create_dataset('hybrid/cumQuanta', (nT, nS), data = hybridInput)
+                data.create_dataset('hybrid/lambda', (nT, nS), data = lambdaH)
+                data.create_dataset('hybrid/varQuanta', (nT, nS), data = hybridVar)
+                data.create_dataset('hybrid/quanta', (nS, nGen), data=hybridQuanta, dtype=int)
+                data.create_dataset('hybrid/fuckups', dtype=int, data=hybridFuckups)
+                
+            if (savePhaseStats == True):
+                data.create_dataset('hybrid/phaseVar', data=hybridPhaseVar)
+                data.create_dataset('hybrid/expPhaseVar', data=exHybridVar)
+            
+        #######RATE SAVING##############
+        if (doRate == True):
+            
+            if (doCurr == True):
+                data.create_dataset('rate/current/spikeMatrix', (nS, nGen, rateSpikes), data=rateSpikeMat)
+                if (saveMeanV == True):
+                    data.create_dataset('rate/current/meanV', (nS, nT), data=rateMean)
+                if (saveMeanFreeV == True):
+                    data.create_dataset('rate/current/freeV', (nS, nT), data=rateFree)
+                if (saveFirstSpikes == True):
+                    data.create_dataset('rate/current/firstSpikes', data=rateFirst)
+                if (save==True):
+                    data.create_dataset('rate/current/VSamples', (nS, nT, nGen), data = rateVs)
+                    data.create_dataset('rate/current/freeVSamples', (nS, nT, nGen), data = rateFreeVs)
+                
+            if (doCond == True):
+                data.create_dataset('rate/conductance/spikeMatrix', (nS, nGen, rateSpikesCond), data=rateCondTimes)
+                if (saveMeanV == True):
+                    data.create_dataset('rate/conductance/meanV', (nS, nT), data=rateMeanCond)
+                if (saveMeanFreeV == True):
+                    data.create_dataset('rate/conductance/freeV', (nS, nT), data=rateMeanFreeCond)
+                if (saveFirstSpikes == True):
+                    data.create_dataset('rate/conductance/firstSpikes', data=rateFirstCond)
+                if (save==True):
+                    data.create_dataset('rate/conductance/VSamples', (nS, nT, nGen), data = rateAllCond)
+                    data.create_dataset('rate/conductance/freeVSamples', (nS, nT, nGen), data = rateAllFreeCond)
+                
+            if (saveQuantaStats == True):
+                data.create_dataset('rate/cumQuanta', (nT, nS), data = rateInput)
+                data.create_dataset('rate/lambda', (nT, nS), data = lambdaR)
+                data.create_dataset('rate/varQuanta', (nT, nS), data = rateVar)
+                data.create_dataset('rate/quanta', (nS, nGen), dtype=int, data=rateQuanta)
+                data.create_dataset('rate/fuckups', dtype=int, data=rateFuckups)
+                
+            if (savePhaseStats == True):
+                data.create_dataset('rate/phaseVar', data=ratePhaseVar)
+                data.create_dataset('rate/expPhaseVar', data=exRateVar)
+            
+                    
+                
+        #######AMP SAVING##############
+        if (doAmp == True):
+            
+            if (doCurr == True):
+                data.create_dataset('amp/current/spikeMatrix', (nS, nGen, ampSpikes), data=ampSpikeMat)
+                if (saveMeanV == True):
+                    data.create_dataset('amp/current/meanV', (nS, nT), data=ampMean)
+                if (saveMeanFreeV == True):
+                    data.create_dataset('amp/current/freeV', (nS, nT), data=ampFree)
+                if (saveFirstSpikes == True):
+                    data.create_dataset('amp/current/firstSpikes', data=ampFirst)
+                if (save==True):
+                    data.create_dataset('amp/current/VSamples', (nS, nT, nGen), data = ampVs)
+                    data.create_dataset('amp/current/freeVSamples', (nS, nT, nGen), data = ampFreeVs)
+            
+            if (doCond == True):
+                data.create_dataset('amp/conductance/spikeMatrix', (nS, nGen,ampSpikesCond), data=ampCondTimes)
+                if (saveMeanV == True):
+                    data.create_dataset('amp/conductance/meanV', (nS, nT), data=ampMeanCond)
+                if (saveMeanFreeV == True):
+                    data.create_dataset('amp/conductance/freeV', (nS, nT), data=ampMeanFreeCond)
+                if (saveFirstSpikes == True):
+                    data.create_dataset('amp/conductance/firstSpikes', data=ampFirstCond)
+                if (save==True):
+                    data.create_dataset('amp/conductance/VSamples', (nS, nT, nGen), data = ampAllCond)
+                    data.create_dataset('amp/conductance/freeVSamples', (nS, nT, nGen), data = ampAllFreeCond)
+                
+            if (saveQuantaStats == True):
+                data.create_dataset('amp/cumQuanta', (nT, nS), data = ampInput)
+                data.create_dataset('amp/lambda', (nT, nS), data = lambdaA)
+                data.create_dataset('amp/varQuanta', (nT, nS), data = ampVar)
+                data.create_dataset('amp/quanta', (nS, nGen), dtype=int, data=ampQuanta)
+                data.create_dataset('amp/fuckups', dtype=int, data=ampFuckups)
+                
+            if (savePhaseStats == True):
+                data.create_dataset('amp/phaseVar', data=ampPhaseVar)
+                data.create_dataset('amp/expPhaseVar', data=exAmpVar)
         
         data.close()
-    
     tDataEnd = time.time()
     print('%fs' % (tDataEnd-tData))
     
