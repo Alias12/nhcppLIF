@@ -43,13 +43,16 @@ def hybridInput(nT, nS, maxQ, aVals, aTheta, offSet, f, t, dt, inputs):
     phases = int(nT/nP)
     bins = 16
     nBin = int(nP/bins) #bin size
-    lambdaInt = np.zeros((bins))
+    lambdaInt = np.zeros((bins, nS))
     
     for k in range(0, maxQ+1):
         for j in range(0, phases):
             for l in range(0, bins):
                 for i in range(1, nBin):
-                    lambdaInt[l]+= (lambdaHybrid[j*nP+l*nBin+i, -1, k]-lambdaHybrid[j*nP+l*nBin, -1, k])*nBin/nT*(k+1)**2
+                    for m in range(0, nS):
+                        lambdaInt[l, m]+= (lambdaHybrid[j*nP+l*nBin+i, m, k]-lambdaHybrid[j*nP+l*nBin, m, k])*dt*(k+1)**2
+                        
+    lambdaInt = slideHalfPhase(lambdaInt, nS, bins)
                 
     return lambdaHybrid, exHybrid, lambdaInt
 
@@ -74,23 +77,19 @@ def rateInput(nT, nS, maxQ, exHybrid, offSet, f, t, dt, lambdaAmp, inputs):
     
     lambdaRate[:, :, 0] -= diff[:, :]
     
-    exRate = expVesFull(lambdaRate,nT,nS,maxQ+1)
-    exAmp = expVesFull(lambdaAmp,nT,nS,maxQ+1)
-    
-    diff = exRate-exAmp
-    
     nP = int(1/dt/f)
     phases = int(nT/nP)
     bins = 16
     nBin = int(nP/bins) #bin size
-    lambdaInt = np.zeros((bins))
+    lambdaInt = np.zeros((bins, nS))
     for j in range(0, phases):
         for l in range(0, bins):
             for i in range(1, nBin):
-                lambdaInt[l]+= (lambdaRate[j*nP+l*nBin+i, -1, 0]-lambdaRate[j*nP+l*nBin, -1, 0])*nBin/nT
+                for m in range(0, nS):
+                    lambdaInt[l, m]+= (lambdaRate[j*nP+l*nBin+i, m, 0]-lambdaRate[j*nP+l*nBin, m, 0])*dt
                     
-                    
-                    
+    lambdaInt = slideHalfPhase(lambdaInt, nS, bins)
+    
     return lambdaRate, lambdaInt#, exRate
 
 def ampInput(nT, nS, maxQ, exHybrid, aTheta, offSet, f, t, dt, inputs):
@@ -116,13 +115,16 @@ def ampInput(nT, nS, maxQ, exHybrid, aTheta, offSet, f, t, dt, inputs):
     phases = int(nT/nP)
     bins = 16
     nBin = int(nP/bins) #bin size
-    lambdaInt = np.zeros((bins))
+    lambdaInt = np.zeros((bins, nS))
     
     for k in range(0, maxQ+1):
         for j in range(0, phases):
             for l in range(0, bins):
                 for i in range(1, nBin):
-                    lambdaInt[l]+= (lambdaAmp[j*nP+l*nBin+i, -1, k]-lambdaAmp[j*nP+l*nBin, -1, k])*nBin/nT*(k+1)**2
+                    for m in range(0, nS):
+                        lambdaInt[l, m]+= (lambdaAmp[j*nP+l*nBin+i, m, k]-lambdaAmp[j*nP+l*nBin, m, k])*dt*(k+1)**2
+    
+    lambdaInt = slideHalfPhase(lambdaInt, nS, bins)
     
     return lambdaAmp, lambdaInt#, exAmp
 
@@ -192,20 +194,24 @@ def getCumQuanta(timeSeries, nT, nS, nGen): # timeSeries[contrastN, tN, genN]
 
     return cumQuanta, varQuanta
 
-def getPhaseVar(timeSeries, nT, nGen, f, dt, bins):
+def getPhaseVar(timeSeries, nT, nGen, f, dt, bins, nS):
     nP = int(1/dt/f) #phase size
     nBin = int(nP/bins) #bin size
-    genPhaseVar = np.zeros((nBin, nGen)) #distribution for each gen
+    genPhaseVar = np.zeros((bins, nGen, nS)) #distribution for each gen
     numPhases = int(nT/nP) #number of phases
-    phaseVar = np.zeros((nBin)) #distribution for contrast
+    phaseVar = np.zeros((bins, nS)) #distribution for contrast
     
     for i in range(0, numPhases):
-        for j in range(0, nBin):
+        for j in range(0, bins):
             for k in range(0, nGen):
-                genPhaseVar[j, k] += np.var(timeSeries[-1, (i*nP+j*nBin):(i*nP+(j+1)*nBin), k])
+                for l in range(0, nS):
+                    genPhaseVar[j, k, l] += np.var(timeSeries[l, (i*nP+j*nBin):(i*nP+(j+1)*nBin), k])
     
-    for i in range(0, nBin):
-        phaseVar[i] = np.mean(genPhaseVar[i, :])
+    for i in range(0, bins):
+        for j in range(0, nS):
+            phaseVar[i, j] = np.mean(genPhaseVar[i, :, j])/f**2/dt/500
+            
+    phaseVar = slideHalfPhase(phaseVar, nS, bins)
         
     return phaseVar
 
@@ -417,7 +423,7 @@ def runContrasts(lambdaI, nT, nS, nGen, maxQ, dt, vDev, vThresh, vRest, vReset, 
     if (saveQuantaStats == True):
         cumQuanta, varQuanta = getCumQuanta(timeSeries, nT, nS, nGen)
     if (savePhaseStats == True):
-        phaseVar = getPhaseVar(timeSeries, nT, nGen, f, dt, 16)
+        phaseVar = getPhaseVar(timeSeries, nT, nGen, f, dt, 16, nS)
     
     timeSum = np.zeros((nS))
     timeSum[:] = np.cumsum(modelTimes[:])
@@ -440,16 +446,17 @@ def runContrasts(lambdaI, nT, nS, nGen, maxQ, dt, vDev, vThresh, vRest, vReset, 
 
 def getFirstSpikes(spikeMatrix, nS, nGen):
     
-    firstSpikes = np.zeros((nGen, nS))
+    firstSpikes = np.zeros((nS, nGen))
     
     for j in range(0, nS):
         for k in range(0, nGen):
             if (len(spikeMatrix[j][k])>0):
-                firstSpikes[k, j] = spikeMatrix[j][k][0]
+                firstSpikes[j, k] = spikeMatrix[j][k][0]
             else:
-                firstSpikes[k, j] = np.nan
+                firstSpikes[j, k] = np.nan
                 
     return firstSpikes
+
 
 def cleanSpikeMat(spikeMatrix, nS, nGen, maxSpikes):
     cleanSpikes = np.full((nS, nGen, max(maxSpikes, 1)), np.nan)
@@ -458,6 +465,16 @@ def cleanSpikeMat(spikeMatrix, nS, nGen, maxSpikes):
             for i in range(0, len(spikeMatrix[j][k])):
                 cleanSpikes[j, k, i] = spikeMatrix[j][k][i]
     return cleanSpikes
+
+
+def slideHalfPhase(arr, nS, bins):
+    slidedArr = np.zeros((bins, nS))
+    slide = int(bins/2)
+    for i in range(bins):
+        for j in range(nS):
+            slidedArr[i, j] = arr[(i+slide)%bins, j]
+            
+    return slidedArr
 
 
 def runAll(recLen, dt, f, nS, nGen, offSet, maxAVal, maxTheta, maxQ, vRest, vReset, vThresh, gLeak, res, vDev, tau1, tau2, save, inputs, gExc, vExc, doCond, doHybrid, doRate, doAmp, saveMeanV, saveMeanFreeV, saveQuantaStats, savePhaseStats, saveFirstSpikes, doCurr):
@@ -503,7 +520,7 @@ def runAll(recLen, dt, f, nS, nGen, offSet, maxAVal, maxTheta, maxQ, vRest, vRes
     dFloat = h5py.special_dtype(vlen=np.dtype('float32'))
     
     name = 'data/modelData'+str(vRest)+'_'+str(gLeak)+'_'+str(vDev)+'_'+str(inputs)+'.h5'
-    metadata = 'Model parameters: vRest = '+str(vRest)+'; gLeak = '+str(gLeak)+', vDev = '+str(vDev)+', dt = '+str(dt)+', '+str(inputs)+' inputs used; '+str(nGen)+' simulations for each.'
+    metadata = 'Model parameters: vRest = '+str(vRest)+'; gLeak = '+str(gLeak)+', vDev = '+str(vDev)+', dt = '+str(dt)+', '+str(inputs)+' inputs used at frequency of '+str(f)+'Hz; '+str(nGen)+' simulations for each.'
     with h5py.File(name, 'w') as data:
         
         data.create_dataset('metadata', data=metadata)
